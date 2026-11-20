@@ -19,9 +19,11 @@ const Globe = dynamic(() => import("react-globe.gl"), {
   ),
 });
 
-const countriesGeo = feature(
-  world as any,
-  (world as any).objects.countries
+const countriesGeo = (
+  feature(
+    world as any,
+    (world as any).objects.countries
+  ) as any
 ).features as any[];
 
 type Artwork = {
