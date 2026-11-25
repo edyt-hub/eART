@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import world from "world-atlas/countries-110m.json";
 import { feature } from "topojson-client";
 import { getSupabase } from "../lib/supabase";
@@ -126,6 +127,19 @@ const exploreCategories = [
   "Printmakers",
 ];
 
+// Which words in an artist's niches/category belong to each Explore filter.
+// Covers the onboarding niches (e.g. "Painting") and the demo artists ("Painter").
+const exploreKeywords: Record<string, string[]> = {
+  Painters: ["painter", "painting"],
+  Sculptors: ["sculptor", "sculpture"],
+  Photographers: ["photographer", "photography"],
+  Illustrators: ["illustrator", "illustration", "drawing"],
+  "Digital Artists": ["digital art", "3d art", "animation", "motion graphics", "vfx"],
+  "Graphic Designers": ["graphic design"],
+  "Mixed Media": ["mixed media", "collage"],
+  Printmakers: ["printmaker", "printmaking"],
+};
+
 const uploadCategories = [
   "Painting",
   "Photography",
@@ -243,6 +257,7 @@ function Toggle({
 // ---------------------------------------------------------------------------
 
 export default function Home() {
+  const router = useRouter();
   const [activePage, setActivePage] = useState("Home");
   const [selectedCountry, setSelectedCountry] = useState("");
   const [search, setSearch] = useState("");
@@ -394,7 +409,13 @@ export default function Home() {
           data: { user },
         } = await supabase.auth.getUser();
 
-        if (isMounted && user) setCurrentUserId(user.id);
+        // Not signed in: sign-in comes first.
+        if (!user) {
+          router.replace("/login");
+          return;
+        }
+
+        if (isMounted) setCurrentUserId(user.id);
 
         // Registered artists (select("*") so a missing column can't break loading)
         const { data: profilesData, error: profilesError } = await supabase
@@ -459,6 +480,12 @@ export default function Home() {
 
         if (user) {
           const own = (profilesData || []).find((p: any) => p.id === user.id);
+
+          // Signed in but onboarding not finished: finish it first.
+          if (!own || !own.username || !own.country) {
+            router.replace("/onboarding");
+            return;
+          }
 
           if (own) {
             const cleanUsername = (own.username || "").replace(/^@/, "");
@@ -577,11 +604,12 @@ export default function Home() {
     const matchesCountry =
       !selectedCountry ||
       artist.country.toLowerCase() === selectedCountry.toLowerCase();
+    const keywords = exploreKeywords[exploreCategory] || [
+      exploreCategory.replace(/s$/, "").toLowerCase(),
+    ];
     const matchesCategory =
       exploreCategory === "All" ||
-      artist.category
-        .toLowerCase()
-        .includes(exploreCategory.replace(/s$/, "").toLowerCase());
+      keywords.some((word) => artist.category.toLowerCase().includes(word));
     const q = search.toLowerCase();
     const matchesSearch =
       artist.name.toLowerCase().includes(q) ||
@@ -946,7 +974,7 @@ export default function Home() {
     setEditDraft(initialProfile);
     setProfileError("Please log in to view your profile.");
     setDbArtworks((prev) => prev.map((a) => ({ ...a, isOwn: false })));
-    goTo("Home");
+    router.replace("/login");
   }
 
   function sendChatMessage() {

@@ -1,15 +1,20 @@
-
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import world from "world-atlas/countries-110m.json";
+import { feature } from "topojson-client";
 import { getSupabase } from "../../lib/supabase";
 
-const countries = [
-  "Kenya", "Uganda", "Tanzania", "Rwanda", "Nigeria",
-  "South Africa", "Ghana", "United States", "United Kingdom",
-  "Canada", "Germany", "France", "India", "Japan", "Other",
-];
+// Same country names as the globe on the home page, so clicking a country
+// (and "Surprise me") finds the artists who picked it here.
+const countries: string[] = (
+  (feature(world as any, (world as any).objects.countries) as any)
+    .features as any[]
+)
+  .map((f) => String(f.properties?.name || ""))
+  .filter(Boolean)
+  .sort((a, b) => a.localeCompare(b));
 
 const artCategories = {
   "Visual Arts": [
@@ -46,6 +51,7 @@ const artCategories = {
 export default function OnboardingPage() {
   const router = useRouter();
 
+  const [checking, setChecking] = useState(true);
   const [username, setUsername] = useState("");
   const [country, setCountry] = useState("");
   const [bio, setBio] = useState("");
@@ -53,6 +59,59 @@ export default function OnboardingPage() {
   const [profilePicture, setProfilePicture] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Guard: must be signed in, and skip this page if onboarding is already done.
+  useEffect(() => {
+    let isMounted = true;
+
+    async function guard() {
+      const supabase = getSupabase();
+
+      if (!supabase) {
+        if (isMounted) {
+          setError("Supabase is not configured. Check your environment variables.");
+          setChecking(false);
+        }
+        return;
+      }
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+
+      const { data } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (data?.username && data?.country) {
+        router.replace("/");
+        return;
+      }
+
+      // Pre-fill anything they entered before leaving halfway.
+      if (isMounted && data) {
+        if (data.username) setUsername(String(data.username).replace(/^@/, ""));
+        if (data.country) setCountry(data.country);
+        if (data.bio) setBio(data.bio);
+        if (Array.isArray(data.niches)) setSelectedNiches(data.niches);
+      }
+
+      if (isMounted) setChecking(false);
+    }
+
+    guard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
 
   function toggleNiche(niche: string) {
     setSelectedNiches((previous) =>
@@ -115,8 +174,6 @@ export default function OnboardingPage() {
 
       const cleanUsername = username.trim().toLowerCase();
 
-      console.log("Checking username...");
-
       const { data: existingUser, error: checkError } = await supabase
         .from("profiles")
         .select("id")
@@ -132,8 +189,6 @@ export default function OnboardingPage() {
       let avatarUrl: string | null = null;
 
       if (profilePicture) {
-        console.log("Uploading profile picture...");
-
         const extension = profilePicture.name.split(".").pop()?.toLowerCase();
 
         if (!["jpg", "jpeg", "png", "webp"].includes(extension || "")) {
@@ -158,8 +213,6 @@ export default function OnboardingPage() {
         avatarUrl = publicUrl.publicUrl;
       }
 
-      console.log("Saving artist profile...");
-
       const { error: saveError } = await supabase
         .from("profiles")
         .upsert(
@@ -175,8 +228,6 @@ export default function OnboardingPage() {
         );
 
       if (saveError) throw saveError;
-
-      console.log("Artist profile saved successfully.");
 
       router.push("/");
       router.refresh();
@@ -199,6 +250,14 @@ export default function OnboardingPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (checking) {
+    return (
+      <main className="min-h-screen bg-[#090909] text-gray-400 flex items-center justify-center">
+        <p className="text-sm">Loading...</p>
+      </main>
+    );
   }
 
   return (
