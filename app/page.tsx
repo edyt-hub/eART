@@ -167,10 +167,9 @@ function imageUrl(image: string) {
   return `https://images.unsplash.com/${image}?w=900&q=85`;
 }
 
-function exhibitionStatus(dateText: string) {
+function exhibitionStatus(dateText: string, today: Date | null) {
   const eventDate = new Date(dateText);
-  if (isNaN(eventDate.getTime())) return "Upcoming";
-  const today = new Date();
+  if (isNaN(eventDate.getTime()) || !today) return "Upcoming";
   const a = new Date(eventDate.getFullYear(), eventDate.getMonth(), eventDate.getDate()).getTime();
   const b = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
   if (a === b) return "Today";
@@ -299,6 +298,9 @@ export default function Home() {
 
   const [globeSize, setGlobeSize] = useState({ width: 900, height: 650 });
 
+  // Set after mount (not during render) so server and browser can't disagree.
+  const [currentDate, setCurrentDate] = useState<Date | null>(null);
+
   // UPLOAD STATE
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPreview, setUploadPreview] = useState("");
@@ -334,6 +336,30 @@ export default function Home() {
     update();
     media.addEventListener?.("change", update);
     return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  // Keep currentDate fresh: set it now, then again just after each midnight,
+  // so Artist of the day changes even if the tab stays open overnight.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+
+    function schedule() {
+      const now = new Date();
+      setCurrentDate(now);
+
+      const nextMidnight = new Date(
+        now.getFullYear(),
+        now.getMonth(),
+        now.getDate() + 1,
+        0,
+        0,
+        1
+      );
+      timer = setTimeout(schedule, nextMidnight.getTime() - now.getTime());
+    }
+
+    schedule();
+    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -563,14 +589,20 @@ export default function Home() {
     return matchesCountry && matchesCategory && matchesSearch;
   });
 
+  // ARTIST OF THE DAY
   const artistOfDay = useMemo(() => {
-    if (availableArtists.length === 0) return null;
-    const today = new Date();
+    if (availableArtists.length === 0 || !currentDate) return null;
+
     const dayNumber = Math.floor(
-      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()) / 86400000
+      Date.UTC(
+        currentDate.getFullYear(),
+        currentDate.getMonth(),
+        currentDate.getDate()
+      ) / 86400000
     );
+
     return availableArtists[dayNumber % availableArtists.length];
-  }, [availableArtists]);
+  }, [availableArtists, currentDate]);
 
   const myArtworks = dbArtworks.filter((art) => art.isOwn);
 
@@ -1019,7 +1051,7 @@ export default function Home() {
 
   function exhibitionCard(event: Exhibition) {
     const following = followedExhibitions.includes(event.id);
-    const status = exhibitionStatus(event.date);
+    const status = exhibitionStatus(event.date, currentDate);
 
     return (
       <div
@@ -2057,7 +2089,7 @@ export default function Home() {
               </p>
               <p className="text-sm text-[#b1842d] mt-1">
                 {selectedExhibition.date} · {selectedExhibition.format} ·{" "}
-                {exhibitionStatus(selectedExhibition.date)}
+                {exhibitionStatus(selectedExhibition.date, currentDate)}
               </p>
               <p className="text-sm mt-4">{selectedExhibition.description}</p>
 
